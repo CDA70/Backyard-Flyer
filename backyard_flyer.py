@@ -1,5 +1,8 @@
 import argparse
 import time
+import math
+import matplotlib.pyplot as plt
+
 from enum import Enum
 
 import numpy as np
@@ -22,6 +25,7 @@ class BackyardFlyer(Drone):
 
     def __init__(self, connection):
         super().__init__(connection)
+
         self.target_position = np.array([0.0, 0.0, 0.0])
         self.all_waypoints = []
         self.in_mission = True
@@ -35,13 +39,37 @@ class BackyardFlyer(Drone):
         self.register_callback(MsgID.LOCAL_VELOCITY, self.velocity_callback)
         self.register_callback(MsgID.STATE, self.state_callback)
 
+    
+
     def local_position_callback(self):
         """
         TODO: Implement this method
 
         This triggers when `MsgID.LOCAL_POSITION` is received and self.local_position contains new data
         """
-        pass
+       
+        # if the flight phase is "TAKEOFF" and the drone is at 95% of the target guide
+        # then assign all way points to fly in a square
+        if self.flight_state == States.TAKEOFF:
+            if -1.0 * self.local_position[2] > 0.95 * self.target_position[2]:
+                self.all_waypoints = self.calculate_box()
+                self.waypoint_transition()
+
+        elif self.flight_state == States.WAYPOINT:
+            # I used euclidean, but looking at the solution, np.linalg.norm is used
+            # I will investigate numpy to understand the difference 
+
+            dist_target_local = [(a - b)**2 for a, b in zip(self.target_position[0:2], self.local_position[0:2])]
+            dist_target_local = math.sqrt(sum(dist_target_local)) 
+            if dist_target_local < 1.0:
+                if len(self.all_waypoints) > 0:
+                    self.waypoint_transition()
+                else:
+                    if np.linalg.norm(self.local_velocity[0:2]) < 1.0:
+                        self.landing_transition()
+
+    
+    
 
     def velocity_callback(self):
         """
@@ -49,7 +77,11 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.LOCAL_VELOCITY` is received and self.local_velocity contains new data
         """
-        pass
+        if self.flight_state == States.LANDING:
+            if self.global_position[2] - self.global_home[2] < 0.1:
+                if abs(self.local_position[2]) <0.01:
+                    self.disarming_transition()
+
 
     def state_callback(self):
         """
@@ -57,14 +89,21 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.STATE` is received and self.armed and self.guided contain new data
         """
-        pass
+        if self.in_mission:
+            if self.flight_state == States.MANUAL:
+                self.arming_transition()
+            elif self.flight_state == States.ARMING:
+                self.takeoff_transition()
+            elif self.flight_state == States.DISARMING:
+                self.manual_transition()
+
 
     def calculate_box(self):
         """TODO: Fill out this method
         
         1. Return waypoints to fly a box
         """
-        pass
+        return [[10.0, 0.0, 3.0],[10.0, 10.0, 3.0],[0.0, 10.0, 3.0],[0.0,0.0,3.0]]
 
     def arming_transition(self):
         """TODO: Fill out this method
@@ -75,6 +114,12 @@ class BackyardFlyer(Drone):
         4. Transition to the ARMING state
         """
         print("arming transition")
+        self.take_control()
+        self.arm()
+        self.set_home_position(self.global_position[0],
+                               self.global_position[1],
+                               self.global_position[2])
+        self.flight_state = States.ARMING
 
     def takeoff_transition(self):
         """TODO: Fill out this method
@@ -84,6 +129,10 @@ class BackyardFlyer(Drone):
         3. Transition to the TAKEOFF state
         """
         print("takeoff transition")
+        target_altitude = 3.0
+        self.target_position[2] = target_altitude
+        self.takeoff(target_altitude)
+        self.flight_state = States.TAKEOFF
 
     def waypoint_transition(self):
         """TODO: Fill out this method
@@ -92,6 +141,22 @@ class BackyardFlyer(Drone):
         2. Transition to WAYPOINT state
         """
         print("waypoint transition")
+        # initially I worked with a counter, but a list with the POP method 
+        # makes more sense. all_waypoints.pop(0) will remove the first item 
+        # from the list. but first the target position is filled with the first 
+        # item from the list
+        # set the flight phase to WAYPOINT, the callback function uses the event
+        # to decide the next phase
+        self.target_position = self.all_waypoints.pop(0)
+        print('flying to position: ', self.target_position)
+        # north, east, altitude, heading
+        self.cmd_position(self.target_position[0],
+                          self.target_position[1],
+                          self.target_position[2],
+                          0.0)
+        self.flight_state = States.WAYPOINT
+
+
 
     def landing_transition(self):
         """TODO: Fill out this method
@@ -100,6 +165,8 @@ class BackyardFlyer(Drone):
         2. Transition to the LANDING state
         """
         print("landing transition")
+        self.land()
+        self.flight_state = States.LANDING
 
     def disarming_transition(self):
         """TODO: Fill out this method
@@ -108,6 +175,9 @@ class BackyardFlyer(Drone):
         2. Transition to the DISARMING state
         """
         print("disarm transition")
+        self.disarm()
+        self.release_control()
+        self.flight_state = States.DISARMING
 
     def manual_transition(self):
         """This method is provided
@@ -137,6 +207,7 @@ class BackyardFlyer(Drone):
         self.connection.start()
         print("Closing log file")
         self.stop_log()
+        
 
 
 if __name__ == "__main__":
@@ -150,3 +221,6 @@ if __name__ == "__main__":
     drone = BackyardFlyer(conn)
     time.sleep(2)
     drone.start()
+
+    
+
