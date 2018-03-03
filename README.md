@@ -213,7 +213,7 @@ def global_to_local(global_position, global_home):
 
 The Drone actually flew a square, but the plotted result shows that it's hard to control it precise. 
 
-I created two files, the backyard_flyer.py is the actual file where the drone is following a square flight path. the second file is a jupyter notebook where I was able to plot the logged data. It clearly shows that there is lots of inperfection in the square.
+I created two files, the backyard_flyer.py is the actual file where the drone is following a square flight path. the second file (called flyer.ipynb) is a jupyter notebook where I was able to plot the logged data. It clearly shows that there is lots of inperfection in the square.
 
 
 
